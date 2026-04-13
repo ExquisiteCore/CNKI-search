@@ -1,0 +1,18 @@
+{
+  "name": "cnki-search",
+  "owner": {
+    "name": "xiaol"
+  },
+  "metadata": {
+    "description": "Search and retrieve academic papers from CNKI (中国知网)"
+  },
+  "plugins": [
+    {
+      "name": "cnki-search",
+      "description": "知网论文检索：关键词搜索、高级检索、元数据提取、批量导出",
+      "source": "./",
+      "category": "research",
+      "tags": ["cnki", "知网", "论文", "文献检索", "academic", "research"]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "cnki-search",
+  "displayName": "知网检索助手 (CNKI Search)",
+  "description": "Search and retrieve academic papers from CNKI via CDP browser automation - supports keyword search, advanced search, paper metadata extraction, and batch export",
+  "version": "1.0.0",
+  "author": {
+    "name": "xiaol"
+  },
+  "license": "MIT",
+  "keywords": [
+    "cnki",
+    "知网",
+    "论文检索",
+    "academic",
+    "paper",
+    "search",
+    "literature",
+    "文献"
+  ],
+  "skills": "./"
+}
