@@ -1,17 +1,38 @@
-# cnki-search Skill 安装指南
+# cnki-search 安装指南
 
-本 skill 包含两部分：
+本仓库由两部分组成，**都需要装上才能在 Claude Code 里自然语言触发知网检索**：
 
-1. **`cnki` CLI 二进制** —— 独立的 Go 程序，负责驱动本地 Chrome 访问知网
-2. **Skill 文档** —— Claude Code 读取的 `SKILL.md`，把自然语言翻译成 `cnki` 命令
+1. **Claude Code Plugin** —— `.claude-plugin/plugin.json` + `skills/cnki-search/SKILL.md`，告诉 Claude 怎么调用 CLI
+2. **`cnki` CLI 二进制** —— Go 程序，真正驱动本地 Chrome 访问知网
 
-两者都要安装才能用。
+## 一、安装 Plugin（推荐：Claude Code Marketplace）
 
-## 一、安装 `cnki` CLI
+在 Claude Code 里执行：
+
+```
+/plugin marketplace add ExquisiteCore/cnki-search
+/plugin install cnki-search@cnki-search
+```
+
+第一条把本仓库注册为一个 marketplace；第二条从该 marketplace 装 `cnki-search` 插件。装完 `/reload-plugins` 或重启 Claude Code，skill 会自动加载到命名空间 `cnki-search`。
+
+### 本地开发 / 调试
+
+如果你在本地 clone 了仓库想实时改 SKILL.md 调试，不需要走 marketplace，直接：
+
+```bash
+claude --plugin-dir /path/to/cnki-search
+```
+
+这会优先加载本地副本，改完跑 `/reload-plugins` 生效。
+
+## 二、安装 `cnki` CLI
+
+Plugin 只负责告诉 Claude 怎么调 CLI，CLI 本身必须装到系统 PATH。三种方式任选其一：
 
 ### 方式 A：下载预编译二进制（推荐）
 
-去 [GitHub Releases](https://github.com/ExquisiteCore/cnki-search/releases) 下载对应平台的归档：
+去 [GitHub Releases](https://github.com/ExquisiteCore/cnki-search/releases) 下载对应平台归档：
 
 - Windows：`cnki_windows_amd64.zip`
 - macOS：`cnki_darwin_amd64.tar.gz`（Intel）/ `cnki_darwin_arm64.tar.gz`（Apple Silicon）
@@ -50,43 +71,6 @@ cd cnki-search
 go build -o cnki ./cmd/cnki    # Linux/macOS
 # Windows PowerShell: go build -o cnki.exe .\cmd\cnki
 ```
-
-## 二、安装 Skill 文档
-
-Claude Code 读取 skill 文档的路径是 `~/.claude/skills/<skill-name>/`。本仓库的 Skill 资源放在 `skill/` 子目录下（与 Go CLI 源码隔离），所以不能直接把整个仓库 clone 过去——需要让 `~/.claude/skills/cnki-search/` 指向 `<repo>/skill/`。
-
-**推荐做法：symlink**
-
-```bash
-# Linux / macOS
-git clone https://github.com/ExquisiteCore/cnki-search ~/src/cnki-search
-ln -s ~/src/cnki-search/skill ~/.claude/skills/cnki-search
-```
-
-```powershell
-# Windows PowerShell（需要开发者模式或管理员）
-git clone https://github.com/ExquisiteCore/cnki-search $env:USERPROFILE\src\cnki-search
-New-Item -ItemType SymbolicLink `
-  -Path $env:USERPROFILE\.claude\skills\cnki-search `
-  -Target $env:USERPROFILE\src\cnki-search\skill
-```
-
-symlink 的好处是 `git pull` 一次即可同时更新 CLI 源码和 Skill 文档。
-
-**备选：直接复制**
-
-如果不想用 symlink：
-
-```bash
-git clone https://github.com/ExquisiteCore/cnki-search ~/src/cnki-search
-cp -r ~/src/cnki-search/skill ~/.claude/skills/cnki-search
-```
-
-注意每次仓库 Skill 文档更新时需要手动重新复制。
-
-**作为 Claude Code Plugin 安装**
-
-如果你的环境支持 Claude Code plugin marketplace，`.claude-plugin/plugin.json` 已配置 `"skills": "./skill"`，可按 plugin 流程加载。
 
 ## 三、首次使用：登录
 
@@ -165,3 +149,9 @@ go version
 ### 登录态丢失
 
 profile 目录被清了，或换机器了。重新跑 `cnki login` 即可。
+
+### Plugin 装好了但 Claude 不识别 skill
+
+1. 跑 `/reload-plugins` 或重启 Claude Code
+2. 跑 `/plugin` 确认 `cnki-search` 在已启用列表里
+3. 确认仓库里 `skills/cnki-search/SKILL.md` 存在且 frontmatter 有 `description` 字段

@@ -38,18 +38,16 @@
 详见 [INSTALL.md](INSTALL.md)。简单来说：
 
 ```bash
-# 1. 装 CLI（任选一种）
+# 1. 装 Plugin（在 Claude Code 里执行）
+/plugin marketplace add ExquisiteCore/cnki-search
+/plugin install cnki-search@cnki-search
+
+# 2. 装 CLI（任选一种）
 # A. 下载 Release：https://github.com/ExquisiteCore/cnki-search/releases
 # B. go install：
 go install github.com/ExquisiteCore/cnki-search/cmd/cnki@latest
 # C. 源码构建：
 git clone https://github.com/ExquisiteCore/cnki-search && cd cnki-search && go build -o cnki ./cmd/cnki
-
-# 2. 装 Skill 文档（任选一种，详见 INSTALL.md）
-# A. symlink（推荐）：
-ln -s /path/to/cnki-search/skill ~/.claude/skills/cnki-search
-# B. 复制：
-cp -r /path/to/cnki-search/skill ~/.claude/skills/cnki-search
 
 # 3. 首次登录（一次就好）
 cnki login
@@ -152,17 +150,17 @@ cnki-search/
 │   ├── cnki/                  #   知网业务逻辑（search/detail/refs + selectors）
 │   ├── model/                 #   数据结构
 │   └── render/                #   json/table/citation/markdown 渲染
-├── skill/                     # Claude Code Skill 资源（与 Go 源码隔离）
+├── skills/cnki-search/        # Claude Code Skill 资源（plugin 规范布局）
 │   ├── SKILL.md               #   Claude 读取的 Skill 定义
 │   └── references/
 │       └── cnki.net.md        #   知网站点经验（DOM/反爬/陷阱）
 ├── .claude-plugin/            # Claude Code 插件元数据
-│   ├── plugin.json            #   "skills": "./skill"
+│   ├── plugin.json
 │   └── marketplace.json
 ├── .github/workflows/         # CI / Release
 ├── .goreleaser.yaml
 ├── go.mod / go.sum
-├── INSTALL.md                 # 安装指南（CLI + Skill 两部分）
+├── INSTALL.md                 # 安装指南（Plugin + CLI 两部分）
 ├── README.md                  # 本文件
 └── LICENSE
 ```
@@ -170,7 +168,7 @@ cnki-search/
 两部分明确分工：
 
 - **Go CLI 部分**（`cmd/`, `internal/`, `go.mod`, `.goreleaser.yaml`）——独立二进制，可被任何工具调用
-- **Skill 部分**（`skill/`, `.claude-plugin/`）——Claude Code 读取的文档，告诉 Claude 怎么调用 CLI
+- **Plugin 部分**（`skills/`, `.claude-plugin/`）——Claude Code 读取的 SKILL.md，告诉 Claude 怎么调用 CLI
 
 ## License
 

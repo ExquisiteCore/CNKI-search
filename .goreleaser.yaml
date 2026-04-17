@@ -36,8 +36,8 @@ archives:
       - README.md
       - INSTALL.md
       - LICENSE*
-      - src: skill/**
-        dst: skill
+      - src: skills/**
+        dst: skills
 
 checksum:
   name_template: "checksums.txt"

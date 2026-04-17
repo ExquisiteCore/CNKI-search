@@ -6,6 +6,8 @@
   "author": {
     "name": "xiaol"
   },
+  "homepage": "https://github.com/ExquisiteCore/cnki-search",
+  "repository": "https://github.com/ExquisiteCore/cnki-search",
   "license": "MIT",
   "keywords": [
     "cnki",
@@ -18,6 +20,5 @@
     "文献",
     "chromedp",
     "go-cli"
-  ],
-  "skills": "./skill"
+  ]
 }
