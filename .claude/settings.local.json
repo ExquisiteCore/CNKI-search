@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rtk ls *)",
+      "Bash(go version *)",
+      "Bash(go mod *)",
+      "Bash(go list *)",
+      "Bash(go get *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(bin/cnki.exe --version)",
+      "Bash(bin/cnki.exe detail *)"
+    ]
+  }
+}

@@ -35,8 +35,9 @@ archives:
     files:
       - README.md
       - INSTALL.md
-      - SKILL.md
       - LICENSE*
+      - src: skill/**
+        dst: skill
 
 checksum:
   name_template: "checksums.txt"

@@ -262,4 +262,4 @@ cnki detail "<paper url>" --with-refs --format=markdown
 
 ## 参考：知网站点特性
 
-参见 `references/cnki.net.md` —— 记录了 CNKI 的 Vue SPA 架构、反爬行为、已知选择器陷阱等知识。该文件是 `cnki` 二进制的 DOM 选择器（`internal/cnki/selectors.go`）维护参考。
+参见同目录下的 `references/cnki.net.md` —— 记录了 CNKI 的 Vue SPA 架构、反爬行为、已知选择器陷阱等知识。该文件也是 `cnki` 二进制的 DOM 选择器（位于项目 `internal/cnki/selectors.go`）的维护参考。

@@ -53,13 +53,40 @@ go build -o cnki ./cmd/cnki    # Linux/macOS
 
 ## 二、安装 Skill 文档
 
-Claude Code 读取 skill 文档的路径是 `~/.claude/skills/<skill-name>/`。
+Claude Code 读取 skill 文档的路径是 `~/.claude/skills/<skill-name>/`。本仓库的 Skill 资源放在 `skill/` 子目录下（与 Go CLI 源码隔离），所以不能直接把整个仓库 clone 过去——需要让 `~/.claude/skills/cnki-search/` 指向 `<repo>/skill/`。
+
+**推荐做法：symlink**
 
 ```bash
-git clone https://github.com/ExquisiteCore/cnki-search ~/.claude/skills/cnki-search
+# Linux / macOS
+git clone https://github.com/ExquisiteCore/cnki-search ~/src/cnki-search
+ln -s ~/src/cnki-search/skill ~/.claude/skills/cnki-search
 ```
 
-> 如果你已经按方式 C 克隆了源码，可以直接用 symlink 或再克隆一份到 skills 目录——Claude 只读这里的 `SKILL.md` 和 `references/`，不读 Go 源码。
+```powershell
+# Windows PowerShell（需要开发者模式或管理员）
+git clone https://github.com/ExquisiteCore/cnki-search $env:USERPROFILE\src\cnki-search
+New-Item -ItemType SymbolicLink `
+  -Path $env:USERPROFILE\.claude\skills\cnki-search `
+  -Target $env:USERPROFILE\src\cnki-search\skill
+```
+
+symlink 的好处是 `git pull` 一次即可同时更新 CLI 源码和 Skill 文档。
+
+**备选：直接复制**
+
+如果不想用 symlink：
+
+```bash
+git clone https://github.com/ExquisiteCore/cnki-search ~/src/cnki-search
+cp -r ~/src/cnki-search/skill ~/.claude/skills/cnki-search
+```
+
+注意每次仓库 Skill 文档更新时需要手动重新复制。
+
+**作为 Claude Code Plugin 安装**
+
+如果你的环境支持 Claude Code plugin marketplace，`.claude-plugin/plugin.json` 已配置 `"skills": "./skill"`，可按 plugin 流程加载。
 
 ## 三、首次使用：登录
 

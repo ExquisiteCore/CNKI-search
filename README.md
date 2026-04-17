@@ -45,8 +45,11 @@ go install github.com/ExquisiteCore/cnki-search/cmd/cnki@latest
 # C. 源码构建：
 git clone https://github.com/ExquisiteCore/cnki-search && cd cnki-search && go build -o cnki ./cmd/cnki
 
-# 2. 装 Skill 文档
-git clone https://github.com/ExquisiteCore/cnki-search ~/.claude/skills/cnki-search
+# 2. 装 Skill 文档（任选一种，详见 INSTALL.md）
+# A. symlink（推荐）：
+ln -s /path/to/cnki-search/skill ~/.claude/skills/cnki-search
+# B. 复制：
+cp -r /path/to/cnki-search/skill ~/.claude/skills/cnki-search
 
 # 3. 首次登录（一次就好）
 cnki login
@@ -142,20 +145,32 @@ Claude 会自动拼 `cnki` 命令、解析 JSON、格式化输出。
 
 ```
 cnki-search/
-├── cmd/cnki/                  # CLI 入口
-├── internal/
-│   ├── browser/               # chromedp 封装、profile 管理、验证码检测
-│   ├── cli/                   # cobra 命令定义
-│   ├── cnki/                  # 知网业务逻辑（search/detail/refs + selectors）
-│   ├── model/                 # 数据结构
-│   └── render/                # json/table/citation/markdown 渲染
-├── references/
-│   └── cnki.net.md            # 知网站点经验（DOM/反爬/陷阱）
+├── cmd/cnki/                  # Go CLI 入口
+├── internal/                  # Go 内部包
+│   ├── browser/               #   chromedp 封装、profile 管理、验证码检测
+│   ├── cli/                   #   cobra 命令定义
+│   ├── cnki/                  #   知网业务逻辑（search/detail/refs + selectors）
+│   ├── model/                 #   数据结构
+│   └── render/                #   json/table/citation/markdown 渲染
+├── skill/                     # Claude Code Skill 资源（与 Go 源码隔离）
+│   ├── SKILL.md               #   Claude 读取的 Skill 定义
+│   └── references/
+│       └── cnki.net.md        #   知网站点经验（DOM/反爬/陷阱）
 ├── .claude-plugin/            # Claude Code 插件元数据
-├── SKILL.md                   # Claude 读取的 Skill 定义
-├── INSTALL.md                 # 安装指南
-└── README.md
+│   ├── plugin.json            #   "skills": "./skill"
+│   └── marketplace.json
+├── .github/workflows/         # CI / Release
+├── .goreleaser.yaml
+├── go.mod / go.sum
+├── INSTALL.md                 # 安装指南（CLI + Skill 两部分）
+├── README.md                  # 本文件
+└── LICENSE
 ```
+
+两部分明确分工：
+
+- **Go CLI 部分**（`cmd/`, `internal/`, `go.mod`, `.goreleaser.yaml`）——独立二进制，可被任何工具调用
+- **Skill 部分**（`skill/`, `.claude-plugin/`）——Claude Code 读取的文档，告诉 Claude 怎么调用 CLI
 
 ## License
 
