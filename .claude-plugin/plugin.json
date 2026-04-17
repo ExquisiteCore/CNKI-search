@@ -19,5 +19,5 @@
     "chromedp",
     "go-cli"
   ],
-  "skills": "./"
+  "skills": "./skill"
 }
