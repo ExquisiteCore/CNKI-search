@@ -1,92 +1,159 @@
 # cnki-search
 
-Claude Code / Codex skill，用于在中国知网（CNKI）上检索学术论文。
+独立的知网（CNKI）学术论文检索命令行工具 + Claude Code Skill。
+
+- **`cnki` CLI**：Go 写的独立二进制，通过 chromedp 驱动本地 Chrome 访问中国知网执行检索，JSON 输出，可被任何工具/脚本调用。
+- **Claude Code Skill**：`SKILL.md` 指引 Claude 把自然语言翻译成 `cnki` 命令，自动化完成文献检索 → 解析 → 格式化 → 输出的全流程。
+
+相比 v1，**不再依赖** `web-access` skill 或系统 Chrome 远程调试。整个项目自包含。
 
 ## 功能
 
-- **多字段检索**：主题、关键词、篇名、作者、摘要、DOI 等
-- **高级筛选**：时间范围、文献类型（期刊/硕博/会议）、来源类型（SCI/EI/核心/CSSCI）
-- **元数据提取**：标题、作者、单位、摘要、关键词、DOI、分类号、基金项目、被引/下载次数
-- **参考文献提取**：获取论文的参考文献列表
-- **多种输出格式**：表格列表 / 详细卡片 / GB/T 7714 引用格式
-- **自动翻页**：按需获取指定数量的检索结果
-- **Skill 协作**：可被 lunwen、research-writing-skill 等论文写作 skill 调用
+- **多字段检索**：主题 / 关键词 / 篇名 / 作者 / 摘要 / 全文 / DOI
+- **高级筛选**：时间范围、文献类型（期刊/硕博/会议/报纸/年鉴）、来源类型（SCI/EI/核心/CSSCI/CSCD）
+- **排序**：相关度 / 发表时间 / 被引 / 下载
+- **元数据抽取**：标题、作者、单位、摘要、关键词、DOI、分类号、基金、被引、下载
+- **参考文献导出**：GB/T 7714 格式
+- **多种输出**：JSON（默认）/ table / citation / markdown
+- **自动翻页**：按需抓取任意数量结果
+- **登录态持久化**：内置 profile 目录，`cnki login` 一次后续复用
+- **无头运行**：默认后台 Chrome，不打扰桌面
 
-## 依赖
+## 架构
 
-- [web-access skill](https://github.com/eze-is/web-access) — 提供 CDP 浏览器自动化能力
-- Chrome 浏览器（已开启远程调试）
-- Node.js 22+
+```
+┌─────────────────┐   CLI args      ┌─────────────────────┐
+│  Claude Code    │ ───────────────▶│  cnki (Go binary)   │
+│  (SKILL.md)     │ ◀─── JSON ───── │  chromedp + Chrome  │
+└─────────────────┘                 └──────────┬──────────┘
+                                               │ CDP
+                                               ▼
+                                     ┌───────────────────┐
+                                     │  kns.cnki.net     │
+                                     └───────────────────┘
+```
 
 ## 安装
 
+详见 [INSTALL.md](INSTALL.md)。简单来说：
+
 ```bash
-# 1. 先安装 web-access skill（如果尚未安装）
-claude install-skill https://github.com/eze-is/web-access
+# 1. 装 CLI（任选一种）
+# A. 下载 Release：https://github.com/ExquisiteCore/cnki-search/releases
+# B. go install：
+go install github.com/ExquisiteCore/cnki-search/cmd/cnki@latest
+# C. 源码构建：
+git clone https://github.com/ExquisiteCore/cnki-search && cd cnki-search && go build -o cnki ./cmd/cnki
 
-# 2. 安装本 skill
-git clone <本仓库地址> ~/.claude/skills/cnki-search
+# 2. 装 Skill 文档
+git clone https://github.com/ExquisiteCore/cnki-search ~/.claude/skills/cnki-search
+
+# 3. 首次登录（一次就好）
+cnki login
 ```
-
-详细的新设备安装步骤见 [INSTALL.md](INSTALL.md)。
 
 ## 使用
 
-在 Claude Code 中直接用自然语言触发：
+### 作为 CLI 直接用
+
+```bash
+# 基础检索（默认 JSON）
+cnki search "深度学习" --size=10
+
+# 核心期刊，按被引排序，近五年
+cnki search "大语言模型" --source=core --from=2020 --to=2025 --sort=cited --size=30
+
+# 人类可读表格
+cnki search "Transformer" --size=10 --format=table
+
+# GB/T 7714 引用格式
+cnki search "知识图谱" --size=20 --format=citation
+
+# 论文详情 + 参考文献
+cnki detail "https://kns.cnki.net/kcms2/article/abstract?v=..." --with-refs --format=markdown
+
+# 作者检索
+cnki search "张钹" --field=author --size=15
+```
+
+### 作为 Claude Code Skill 用
+
+装好之后在 Claude Code 里直接用自然语言触发：
 
 ```
 帮我在知网上搜索"深度学习 图像识别"相关论文，要核心期刊，2020年以后的，按被引排序
 
-在知网检索作者"张三"的论文
+在知网检索作者"张钹"的论文
 
-帮我查一下知网上关于"大语言模型"的最新研究，需要 30 篇
+帮我查一下知网上关于"大语言模型"的最新研究，需要 30 篇，给我 GB/T 7714 引用格式
 ```
 
-### 检索参数
+Claude 会自动拼 `cnki` 命令、解析 JSON、格式化输出。
 
-| 参数 | 可选值 | 默认 |
+## 命令速查
+
+### 全局 flag
+
+| Flag | 说明 | 默认 |
+|------|------|------|
+| `--format` | json / table / citation / markdown | json |
+| `--headed` | 有头模式（调试 / 登录 / 过验证码） | false |
+| `--timeout` | 整体超时 | 90s |
+| `--chrome` | Chrome 路径 | 自动探测 |
+| `--profile-dir` | 用户数据目录 | 系统 cache 目录下 |
+| `-v, --verbose` | 打印 chromedp 日志到 stderr | false |
+
+### `cnki search <query>`
+
+| Flag | 可选值 | 默认 |
 |------|--------|------|
-| 检索字段 | 主题 / 关键词 / 篇名 / 作者 / 摘要 / 全文 / DOI | 主题 |
-| 时间范围 | 任意起止年份 | 不限 |
-| 文献类型 | 期刊论文 / 硕士论文 / 博士论文 / 会议论文 | 全部 |
-| 来源类型 | SCI / EI / 核心期刊 / CSSCI / CSCD | 全部 |
-| 排序方式 | 相关度 / 发表时间 / 被引频次 / 下载频次 | 相关度 |
-| 数量 | 任意数量 | 前 20 条 |
+| `--field` | topic / keyword / title / author / abstract / fulltext / doi | topic |
+| `--from` / `--to` | 年份 | 不限 |
+| `--type` | journal / master / phd / conference / newspaper / yearbook（可重复） | 全部 |
+| `--source` | sci / ei / core / cssci / cscd（可重复） | 全部 |
+| `--sort` | relevance / date / cited / downloads | relevance |
+| `--size` | 1-500 | 20 |
 
-### 输出示例
+### `cnki detail <url>`
 
-**表格模式（默认）：**
+| Flag | 说明 |
+|------|------|
+| `--with-refs` | 同时抽取参考文献 |
 
-| # | 标题 | 作者 | 来源 | 年份 | 被引 |
-|---|------|------|------|------|------|
-| 1 | 基于深度学习的图像识别研究 | 张三, 李四 | 计算机学报 | 2024 | 45 |
-| 2 | 卷积神经网络综述 | 王五 | 软件学报 | 2023 | 32 |
+### `cnki refs <url>`
 
-**引用格式（GB/T 7714）：**
+只抽参考文献。
 
-```
-[1] 张三, 李四. 基于深度学习的图像识别研究[J]. 计算机学报, 2024, 46(3): 512-525.
-[2] 王五. 卷积神经网络综述[J]. 软件学报, 2023, 34(2): 201-218.
-```
+### `cnki login`
 
-## 在子 Agent / 其他 Skill 中调用
+有头模式打开知网，用户手动登录后保存 cookie。**首次使用前跑一次。**
 
-```
-必须加载 cnki-search skill 和 web-access skill 并遵循指引。
-任务：在知网上获取关于「{主题}」的学术文献，需要 {N} 篇，按被引频次排序，仅限核心期刊，时间范围 2020-2024。
-```
+## 退出码
+
+| 码 | 含义 |
+|----|------|
+| 0 | 成功 |
+| 1 | 一般错误（网络 / DOM） |
+| 2 | 验证码或反爬拦截（跑 `cnki login` 或 `--headed` 重试） |
+| 3 | 无结果 |
+| 4 | 参数非法 |
 
 ## 项目结构
 
 ```
 cnki-search/
-├── .claude-plugin/
-│   ├── plugin.json           # 插件元数据
-│   └── marketplace.json      # 市场发布配置
+├── cmd/cnki/                  # CLI 入口
+├── internal/
+│   ├── browser/               # chromedp 封装、profile 管理、验证码检测
+│   ├── cli/                   # cobra 命令定义
+│   ├── cnki/                  # 知网业务逻辑（search/detail/refs + selectors）
+│   ├── model/                 # 数据结构
+│   └── render/                # json/table/citation/markdown 渲染
 ├── references/
-│   └── cnki.net.md           # 知网站点经验（DOM 结构、反爬特征、已知陷阱）
-├── SKILL.md                  # Skill 核心定义
-├── INSTALL.md                # 新设备安装指南
+│   └── cnki.net.md            # 知网站点经验（DOM/反爬/陷阱）
+├── .claude-plugin/            # Claude Code 插件元数据
+├── SKILL.md                   # Claude 读取的 Skill 定义
+├── INSTALL.md                 # 安装指南
 └── README.md
 ```
 

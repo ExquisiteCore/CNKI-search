@@ -1,8 +1,8 @@
 {
   "name": "cnki-search",
   "displayName": "知网检索助手 (CNKI Search)",
-  "description": "Search and retrieve academic papers from CNKI via CDP browser automation - supports keyword search, advanced search, paper metadata extraction, and batch export",
-  "version": "1.0.0",
+  "description": "Independent CLI + Claude Code skill for searching academic papers on CNKI (中国知网). Uses embedded chromedp browser automation — no external web-access dependency required.",
+  "version": "2.0.0",
   "author": {
     "name": "xiaol"
   },
@@ -15,7 +15,9 @@
     "paper",
     "search",
     "literature",
-    "文献"
+    "文献",
+    "chromedp",
+    "go-cli"
   ],
   "skills": "./"
 }

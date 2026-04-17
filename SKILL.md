@@ -3,27 +3,41 @@ name: cnki-search
 description:
   在中国知网（CNKI）上检索学术论文。触发场景：用户要求搜索知网论文、查找文献、检索期刊/学位论文/会议论文，
   或提到"知网"、"CNKI"、"中国知网"、"文献检索"、"论文搜索"等关键词时使用此 skill。
-  支持关键词检索、主题检索、作者检索、高级检索、论文详情获取、参考文献/引用文献提取、批量结果导出。
+  支持关键词检索、主题检索、作者检索、高级检索、论文详情获取、参考文献提取、批量结果导出。
 metadata:
   author: xiaol
-  version: "1.0.0"
+  version: "2.0.0"
 ---
 
 # CNKI 知网检索 Skill
 
 ## 概述
 
-通过浏览器 CDP 自动化访问中国知网（https://www.cnki.net），执行学术文献检索任务。本 skill 依赖 **web-access skill** 的 CDP Proxy 基础设施。
+通过独立的 `cnki` Go CLI 驱动本地 Chrome 访问中国知网，执行学术文献检索任务。**不再依赖外部 web-access skill**——本 skill 自带独立的 chromedp 驱动的二进制工具，仅在首次使用时需要登录一次知网账号。
+
+Claude 在这里的职责是：
+
+1. 把用户的自然语言需求翻译成 `cnki` 命令行参数
+2. 执行命令，解析返回的 JSON
+3. 按用户要求渲染成表格 / 引用格式 / 详细卡片
 
 ## 前置依赖
 
-本 skill 必须在 **web-access skill** 已就绪的前提下使用。执行任何操作前：
+### 工具链检查
+
+执行任何操作前，先确认 `cnki` 命令可用：
 
 ```bash
-node "$CLAUDE_SKILL_DIR/../web-access/scripts/check-deps.mjs"
+cnki --version
 ```
 
-如未通过，引导用户按 web-access skill 的指引完成 Chrome remote-debugging 设置。
+如果未安装或返回错误，引导用户按 `INSTALL.md` 步骤安装（推荐：去 GitHub Release 下载预编译二进制并加入 PATH；或 `go install github.com/ExquisiteCore/cnki-search/cmd/cnki@latest`）。
+
+### 登录态检查
+
+知网部分功能（高级筛选、某些年份的详情页、下载）需要登录。**首次使用请提示用户跑一次 `cnki login`**——这会弹出有头 Chrome 让用户手动登录，cookie 保存到本地 profile 目录后，后续无头命令自动复用。
+
+如果后续命令返回退出码 `2`（ErrCaptcha），说明触发了验证码或登录失效，按下文"错误处理"引导用户重新登录。
 
 ## 检索流程
 
@@ -31,309 +45,221 @@ node "$CLAUDE_SKILL_DIR/../web-access/scripts/check-deps.mjs"
 
 与用户确认以下信息（缺省时使用默认值）：
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| **关键词** | 检索词，支持多个（空格或 AND/OR 连接） | 必填 |
-| **检索字段** | 主题 / 关键词 / 篇名 / 作者 / 摘要 / 全文 / 基金 / 参考文献 / DOI | 主题 |
-| **时间范围** | 起止年份 | 不限 |
-| **文献类型** | 期刊论文 / 硕士论文 / 博士论文 / 会议论文 / 报纸 / 年鉴 | 全部 |
-| **来源类型** | 全部 / SCI / EI / 核心期刊 / CSSCI / CSCD | 全部 |
-| **排序方式** | 相关度 / 发表时间（降序） / 被引频次 / 下载频次 | 相关度 |
-| **需要数量** | 需要检索多少篇论文的信息 | 前 20 条 |
+| 参数 | CLI flag | 可选值 | 默认 |
+|------|---------|--------|------|
+| 关键词 | `<query>` 位置参数 | 检索词，多词用空格 | 必填 |
+| 检索字段 | `--field` | topic / keyword / title / author / abstract / fulltext / doi | topic |
+| 起始年份 | `--from` | YYYY | 不限 |
+| 截止年份 | `--to` | YYYY | 不限 |
+| 文献类型 | `--type` | journal / master / phd / conference / newspaper / yearbook（可重复） | 全部 |
+| 来源类型 | `--source` | sci / ei / core / cssci / cscd（可重复） | 全部 |
+| 排序方式 | `--sort` | relevance / date / cited / downloads | relevance |
+| 结果数量 | `--size` | 任意正整数（≤500） | 20 |
+
+缺少关键词时必须向用户追问，其余可用默认值。
 
 ### Phase 2：执行检索
 
-#### 2.1 打开知网并检索
+组装命令，默认 JSON 输出方便后续解析：
 
 ```bash
-# 创建新 tab 访问知网高级检索页
-curl -s "http://localhost:3456/new?url=https://kns.cnki.net/kns8s/AdvSearch"
+cnki search "深度学习 图像识别" \
+  --field=topic \
+  --from=2020 \
+  --source=core \
+  --sort=cited \
+  --size=30 \
+  --format=json
 ```
 
-> **重要**：知网有多个入口域名，统一使用 `kns.cnki.net/kns8s/` 系列 URL。
-
-#### 2.2 知网页面结构认知
-
-知网高级检索页的核心 DOM 结构：
-
-- **检索输入区**：`.search-box` 区域内有多个条件行
-  - 每行包含：字段选择下拉框 + 输入框 + 逻辑运算符（AND/OR/NOT）
-  - 字段选择器：`select` 元素，value 值对应检索字段代码
-  - 输入框：`input.search-input` 或 `input[type="text"]`
-- **时间范围**：年份起止选择器
-- **来源类型**：复选框组（SCI、EI、核心期刊等）
-- **检索按钮**：`input.btn-search` 或类似的提交按钮
-
-#### 2.3 填写检索条件并提交
-
-通过 `/eval` 操作 DOM 来填写检索条件。由于知网页面结构可能更新，**必须先探查当前页面实际 DOM 结构**，再决定操作方式：
+Bash 示例（把 JSON 存到变量中）：
 
 ```bash
-# 1. 先探查搜索区域的 DOM 结构
-curl -s -X POST "http://localhost:3456/eval?target=TAB_ID" \
-  -d 'document.querySelector(".search-box, #advancedSearch, .advance-search, #ModuleSearch")?.innerHTML?.substring(0, 3000)'
-
-# 2. 根据实际 DOM 构造填写逻辑（示例，实际选择器以探查结果为准）
-curl -s -X POST "http://localhost:3456/eval?target=TAB_ID" \
-  -d '(() => {
-    const input = document.querySelector("input.search-input, input[name=\"txt_1_value1\"]");
-    if (input) { input.value = "检索词"; input.dispatchEvent(new Event("input", {bubbles:true})); }
-    return "filled";
-  })()'
-
-# 3. 点击检索
-curl -s -X POST "http://localhost:3456/click?target=TAB_ID" \
-  -d 'input.btn-search, .search-btn, button[type="submit"]'
+RESULT=$(cnki search "大语言模型" --size=20 --sort=cited --format=json)
+# 用 jq 拿到前 5 条标题
+echo "$RESULT" | jq -r '.results[:5] | .[] | .title'
 ```
 
-**关键原则**：知网前端更新频繁，**不要硬编码选择器**。每次操作前先 `/eval` 探查目标元素的真实选择器，再执行操作。
+#### JSON 输出结构
 
-#### 2.4 等待结果加载
+```json
+{
+  "query": {"q":"深度学习","field":"topic","sort":"cited","size":20},
+  "total_hits": 12345,
+  "fetched": 20,
+  "results": [
+    {
+      "seq": 1,
+      "title": "...",
+      "url": "https://kns.cnki.net/kcms2/article/abstract?v=...",
+      "authors": ["张三","李四"],
+      "source": "计算机学报",
+      "year": 2024,
+      "issue": "2024-03",
+      "cited": 45,
+      "downloads": 230
+    }
+  ]
+}
+```
+
+### Phase 3：获取论文详情（可选）
+
+当用户需要某篇论文的完整信息时，**必须使用上一步返回的 `url`**（它带会话参数，不能手工拼接）：
 
 ```bash
-# 等待搜索结果表格加载
-curl -s -X POST "http://localhost:3456/eval?target=TAB_ID" \
-  -d '(() => {
-    const table = document.querySelector(".result-table-list, #gridTable, table.result-table");
-    if (!table) return "LOADING";
-    const rows = table.querySelectorAll("tbody tr");
-    return "LOADED: " + rows.length + " results";
-  })()'
+cnki detail "<paper url from step 2>" --format=json
 ```
 
-如果返回 `LOADING`，等待 2-3 秒后重试（最多 5 次）。
-
-### Phase 3：提取检索结果
-
-#### 3.1 提取结果列表
+加 `--with-refs` 可同时抽取参考文献：
 
 ```bash
-curl -s -X POST "http://localhost:3456/eval?target=TAB_ID" \
-  -d '(() => {
-    const rows = document.querySelectorAll(".result-table-list tbody tr, #gridTable tbody tr");
-    const results = [];
-    rows.forEach((row, i) => {
-      const title = row.querySelector(".name a, td.name a");
-      const authors = row.querySelector(".author, td.author");
-      const source = row.querySelector(".source a, td.source a");
-      const date = row.querySelector(".date, td.date");
-      const cite = row.querySelector(".quote, td.quote");
-      const download = row.querySelector(".download, td.download");
-      if (title) {
-        results.push({
-          seq: i + 1,
-          title: title.textContent.trim(),
-          link: title.href || "",
-          authors: authors?.textContent?.trim() || "",
-          source: source?.textContent?.trim() || "",
-          date: date?.textContent?.trim() || "",
-          cited: cite?.textContent?.trim() || "0",
-          downloads: download?.textContent?.trim() || "0"
-        });
-      }
-    });
-    return JSON.stringify(results, null, 2);
-  })()'
+cnki detail "<paper url>" --with-refs --format=json
 ```
 
-#### 3.2 翻页获取更多结果
+返回字段：`title / authors / institutions / abstract / keywords / doi / clc / source / issue / year / fund / cited / downloads / references`。
 
-当用户需要的数量超出当前页时，逐页获取：
+### Phase 4：单独获取参考文献（可选）
 
 ```bash
-# 点击下一页
-curl -s -X POST "http://localhost:3456/click?target=TAB_ID" \
-  -d '#PageNext, a.next, .pagebar a:last-child'
+cnki refs "<paper url>" --format=json
 ```
 
-每页提取后与已有结果合并，直到达到用户要求的数量。
+返回 `[{seq, text}, ...]` 数组。
 
-### Phase 4：获取论文详情（可选）
+### Phase 5：格式化输出
 
-当用户需要某篇论文的详细信息时，在新 tab 中打开论文详情页：
+根据用户需求选择 CLI 自带的输出格式，或把 JSON 重新渲染：
+
+#### 人类可读表格
+
+CLI 直出，无需二次处理：
 
 ```bash
-# 用论文详情链接打开新 tab
-curl -s "http://localhost:3456/new?url=PAPER_DETAIL_URL"
+cnki search "深度学习" --size=10 --format=table
 ```
 
-从详情页提取完整元数据：
+#### GB/T 7714 引用格式
 
 ```bash
-curl -s -X POST "http://localhost:3456/eval?target=DETAIL_TAB_ID" \
-  -d '(() => {
-    const info = {};
-    info.title = document.querySelector("h1, .wx-tit h1")?.textContent?.trim();
-    info.authors = [...document.querySelectorAll(".author a, h3:first-of-type a")].map(a => a.textContent.trim());
-    info.institutions = [...document.querySelectorAll(".orgn a, h3:nth-of-type(2) a")].map(a => a.textContent.trim());
-    info.abstract = document.querySelector("#ChDivSummary, .abstract-text")?.textContent?.trim();
-    info.keywords = [...document.querySelectorAll(".keywords a, p.keywords a")].map(a => a.textContent.trim().replace(/;$/, ""));
-    const doiEl = [...document.querySelectorAll(".top-tip span, .doi")].find(el => el.textContent.includes("DOI"));
-    info.doi = doiEl?.textContent?.replace(/.*DOI[：:]?\s*/, "").trim() || "";
-    const clcEl = [...document.querySelectorAll(".top-tip span")].find(el => el.textContent.includes("分类号"));
-    info.clc = clcEl?.textContent?.replace(/.*分类号[：:]?\s*/, "").trim() || "";
-    info.source = document.querySelector(".top-tip a:first-child, .sourinfo a")?.textContent?.trim();
-    info.issue = document.querySelector(".top-tip .year, .sourinfo .year")?.textContent?.trim();
-    info.fund = document.querySelector(".fund, .funds")?.textContent?.trim();
-    info.cited = document.querySelector("#annotationcount, .cited")?.textContent?.trim();
-    info.downloads = document.querySelector("#downloadcount, .download")?.textContent?.trim();
-    return JSON.stringify(info, null, 2);
-  })()'
+cnki search "深度学习" --size=10 --format=citation
 ```
 
-### Phase 5：获取参考文献列表（可选）
+输出：
 
-在论文详情页中，参考文献通常需要展开加载：
+```
+[1] 张三, 李四. 基于深度学习的图像识别研究[J]. 计算机学报, 2024.
+[2] 王五. 卷积神经网络综述[J]. 软件学报, 2023.
+```
+
+#### Markdown 详细卡片
 
 ```bash
-curl -s -X POST "http://localhost:3456/eval?target=DETAIL_TAB_ID" \
-  -d '(() => {
-    const refSection = document.querySelector("#CataLogContent .essayBox, .ref-list, #references");
-    if (!refSection) return "NO_REF_SECTION";
-    const refs = [...refSection.querySelectorAll("li, .essayLi")].map((li, i) => ({
-      seq: i + 1,
-      text: li.textContent.trim()
-    }));
-    return JSON.stringify(refs, null, 2);
-  })()'
+cnki detail "<paper url>" --with-refs --format=markdown
 ```
 
-### Phase 6：格式化输出
+输出（对话中可直接展示）：
 
-根据用户需求选择输出格式：
-
-#### 简洁列表（默认）
-
-```
-## 知网检索结果：「{关键词}」
-
-共找到 XX 条结果，以下为前 N 条（按{排序方式}排序）：
-
-| # | 标题 | 作者 | 来源 | 年份 | 被引 |
-|---|------|------|------|------|------|
-| 1 | xxx  | xxx  | xxx  | 2024 | 15   |
-| 2 | xxx  | xxx  | xxx  | 2023 | 8    |
-...
-```
-
-#### 详细信息
-
-对用户指定的论文，输出完整元数据：
-
-```
+```markdown
 ### 《论文标题》
 
 - **作者**：张三, 李四
 - **单位**：XX大学XX学院
 - **来源**：《期刊名》2024年第3期
 - **DOI**：10.xxxx/xxxx
-- **摘要**：...
-- **关键词**：关键词1; 关键词2; 关键词3
-- **分类号**：TP311
-- **基金**：国家自然科学基金(No.xxx)
-- **被引**：15次 | **下载**：230次
+- **被引**：15 次 | **下载**：230 次
+- **关键词**：关键词1; 关键词2
+
+**摘要**：……
 ```
 
-#### 参考文献格式导出
+#### 在对话中直接呈现
 
-当用户需要将检索结果用于论文写作时，按 GB/T 7714 格式输出：
+默认把 JSON 里的 `results` 渲染成如下 Markdown 表格给用户看：
 
 ```
-[1] 张三, 李四. 论文标题[J]. 期刊名, 2024, 30(3): 45-52.
-[2] 王五. 学位论文标题[D]. 北京: 北京大学, 2023.
+## 知网检索结果：「{关键词}」
+
+命中 XX 条，以下为前 N 条（按{排序方式}排序）：
+
+| # | 标题 | 作者 | 来源 | 年份 | 被引 |
+|---|------|------|------|------|------|
+| 1 | ... | ... | ... | 2024 | 15 |
 ```
 
-## 特殊场景处理
+## 错误处理
 
-### 登录提示
+`cnki` 退出码约定：
 
-知网部分功能（如全文下载）需要机构或个人登录。检索和元数据获取通常无需登录。如果遇到登录弹窗：
+| 退出码 | 含义 | 应对 |
+|--------|------|------|
+| 0 | 成功 | 解析 JSON 继续 |
+| 1 | 一般错误（网络/DOM 异常） | 读 stderr 提示用户 |
+| 2 | 验证码或反爬拦截 | 提示用户运行 `cnki login`，或改用 `--headed` 重试 |
+| 3 | 检索结果为空 | 建议用户调整关键词、放宽时间、换检索字段 |
+| 4 | 参数非法 | 读 stderr 的校验提示，重新询问用户 |
 
-```bash
-# 关闭登录弹窗
-curl -s -X POST "http://localhost:3456/eval?target=TAB_ID" \
-  -d '(() => {
-    const close = document.querySelector(".login-mask .close, .modal .close-btn, [class*=\"close\"]");
-    if (close) { close.click(); return "closed"; }
-    return "no_popup";
-  })()'
-```
+### 遇到退出码 2（验证码）
 
-如果登录弹窗阻挡了核心内容获取，告知用户在 Chrome 中登录知网后继续。
+优先级从高到低：
 
-### 反爬/验证码
+1. 引导用户跑 `cnki login` 更新登录态，然后重试
+2. 若用户不想登录，改用 `--headed` 人工过一次验证码：
+   ```bash
+   cnki search "..." --headed --size=10
+   ```
+3. 告知用户短期频繁检索容易触发风控，建议降低频率
 
-知网对自动化操作有检测。如果遇到验证码：
-1. 截图让用户看到当前页面状态
-2. 告知用户手动完成验证码
-3. 用户确认后刷新页面继续
+### 遇到退出码 3（无结果）
 
-```bash
-# 截图当前状态
-curl -s "http://localhost:3456/screenshot?target=TAB_ID&file=/tmp/cnki-captcha.png"
-```
-
-### 搜索结果为空
-
-如果检索无结果：
-1. 建议用户调整关键词（更宽泛/更精确）
-2. 尝试同义词替换
-3. 调整检索字段（如从「篇名」换为「主题」）
-4. 放宽时间范围
-
-### 知网域名和 URL 模式
-
-| 功能 | URL |
-|------|-----|
-| 首页 | `https://www.cnki.net` |
-| 高级检索 | `https://kns.cnki.net/kns8s/AdvSearch` |
-| 简单检索 | `https://kns.cnki.net/kns8s/search` |
-| 论文详情 | `https://kns.cnki.net/kcms2/article/abstract?v=...` |
-| 作者页面 | `https://kns.cnki.net/kcms2/author/detail?v=...` |
+- 放宽 `--from/--to` 年份
+- 把 `--field` 从 `title` 改为 `topic` 或 `keyword`
+- 去掉 `--source` / `--type` 的限制
+- 建议同义词替换（"大语言模型" → "LLM" / "预训练语言模型"）
 
 ## 操作节奏
 
-- **GUI 交互优先**：知网对自动化有检测，优先使用 GUI 交互（点击、输入）模拟用户行为
-- **操作间隔**：相邻操作间保持 1-2 秒自然间隔，避免触发风控
-- **不要并行多 tab**：在知网上避免同时打开过多 tab，串行操作更安全
-- **先探查后操作**：每个操作前先 eval 查看当前 DOM 状态，确认元素存在再操作
+- **串行调用**：避免在同一秒发多个 `cnki search`；必要时用户可以连续追问但别并行触发
+- **先 search 后 detail**：detail URL 必须来自 search 返回的 `url` 字段，不要凭空构造
+- **批量详情要节制**：如果用户要 20 篇的完整详情，分批执行或直接用 search 自带的信息 + 摘要抽取
 
 ## 与其他 Skill 协作
 
 ### 与 lunwen skill 协作
 
 当 lunwen（毕业论文写作）skill 需要文献检索时，本 skill 可被调用来：
-1. 根据论文主题检索相关文献
-2. 提取参考文献的完整元数据
-3. 输出 GB/T 7714 格式的参考文献列表
+
+1. 根据论文主题检索相关文献：`cnki search "主题" --source=core --sort=cited`
+2. 提取参考文献元数据：`cnki detail <url>`
+3. 输出 GB/T 7714 格式：`cnki search ... --format=citation`
 4. 筛选高被引/核心期刊文献
 
 ### 与 research-writing-skill 协作
 
-当 research-writing-skill（科研写作）需要文献综述支持时，本 skill 可：
-1. 按主题批量检索文献
-2. 提取关键论文的摘要和关键词
-3. 为文献综述章节提供素材
+1. 按主题批量检索：`cnki search "..." --size=30 --format=json`
+2. 提取摘要和关键词：迭代 `cnki detail <url>` for top N
+3. 为文献综述提供素材
 
 ## 子 Agent 使用指南
 
 在子 Agent prompt 中调用本 skill：
 
 ```
-必须加载 cnki-search skill 和 web-access skill 并遵循指引。
-任务：在知网上获取关于「{主题}」的学术文献，需要 {N} 篇，按被引频次排序，仅限核心期刊，时间范围 2020-2024。
-将结果以表格形式返回，包含标题、作者、来源、年份、被引次数。
+必须加载 cnki-search skill 并遵循指引。
+任务：用 `cnki` 命令行在知网上获取关于「{主题}」的学术文献，需要 {N} 篇，
+按被引频次排序，仅限核心期刊，时间范围 2020-2025。
+将结果以 GB/T 7714 格式返回。
 ```
 
 ## 任务结束
 
 完成检索后：
-1. 关闭自己创建的所有 tab
-2. 向用户呈现格式化的检索结果
-3. 询问是否需要查看某篇论文的详细信息
+
+1. 向用户呈现格式化结果（默认 Markdown 表格）
+2. 如果用户要了引用格式，附上 `--format=citation` 的输出
+3. 询问是否需要查看某篇的详情（`cnki detail <url>`）
 4. 询问是否需要调整检索条件重新搜索
 
-```bash
-# 关闭 tab
-curl -s "http://localhost:3456/close?target=TAB_ID"
-```
+## 参考：知网站点特性
+
+参见 `references/cnki.net.md` —— 记录了 CNKI 的 Vue SPA 架构、反爬行为、已知选择器陷阱等知识。该文件是 `cnki` 二进制的 DOM 选择器（`internal/cnki/selectors.go`）维护参考。

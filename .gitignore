@@ -2,3 +2,19 @@ node_modules/
 *.log
 .env
 /tmp/
+
+# Go build artifacts
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Chrome profile dir if accidentally created in-repo
+.cnki-search/
