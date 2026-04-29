@@ -1,6 +1,6 @@
 {
   "name": "cnki-search",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "HTTP-based CNKI reference search CLI and Codex skill for finding papers and exporting citations.",
   "author": {
     "name": "xiaol",

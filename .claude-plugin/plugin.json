@@ -2,7 +2,7 @@
   "name": "cnki-search",
   "displayName": "知网检索助手 (CNKI Search)",
   "description": "Independent HTTP CLI + Codex/Claude skill for searching academic papers on CNKI (中国知网). No browser automation required.",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": {
     "name": "xiaol"
   },
