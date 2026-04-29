@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ExquisiteCore/cnki-search/internal/browser"
 	"github.com/ExquisiteCore/cnki-search/internal/cnki"
 	"github.com/ExquisiteCore/cnki-search/internal/render"
 	"github.com/spf13/cobra"
@@ -21,13 +20,8 @@ func newDetailCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), globals.Timeout)
 			defer cancel()
 
-			br, closeBr, err := browser.New(ctx, browserOptsFromGlobals())
-			if err != nil {
-				return withCode(err, 1)
-			}
-			defer closeBr()
-
-			detail, err := cnki.Detail(br, url, withRefs)
+			client := cnki.NewClient(cnki.ClientOptions{UserAgent: globals.UserAgent})
+			detail, err := client.Detail(ctx, url, withRefs)
 			if err != nil {
 				return withCode(err, cnki.ExitCodeFor(err))
 			}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ExquisiteCore/cnki-search/internal/browser"
 	"github.com/ExquisiteCore/cnki-search/internal/cnki"
 	"github.com/ExquisiteCore/cnki-search/internal/render"
 	"github.com/spf13/cobra"
@@ -20,13 +19,8 @@ func newRefsCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), globals.Timeout)
 			defer cancel()
 
-			br, closeBr, err := browser.New(ctx, browserOptsFromGlobals())
-			if err != nil {
-				return withCode(err, 1)
-			}
-			defer closeBr()
-
-			refs, err := cnki.References(br, url)
+			client := cnki.NewClient(cnki.ClientOptions{UserAgent: globals.UserAgent})
+			refs, err := client.References(ctx, url)
 			if err != nil {
 				return withCode(err, cnki.ExitCodeFor(err))
 			}

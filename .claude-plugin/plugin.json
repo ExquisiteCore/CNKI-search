@@ -1,7 +1,7 @@
 {
   "name": "cnki-search",
   "displayName": "知网检索助手 (CNKI Search)",
-  "description": "Independent CLI + Claude Code skill for searching academic papers on CNKI (中国知网). Uses embedded chromedp browser automation — no external web-access dependency required.",
+  "description": "Independent HTTP CLI + Claude Code skill for searching academic papers on CNKI (中国知网). No browser automation required.",
   "version": "2.0.0",
   "author": {
     "name": "xiaol"
@@ -18,7 +18,7 @@
     "search",
     "literature",
     "文献",
-    "chromedp",
+    "http",
     "go-cli"
   ]
 }

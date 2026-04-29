@@ -1,32 +1,32 @@
 # cnki-search
 
-独立的知网（CNKI）学术论文检索命令行工具 + Claude Code Skill。
+`cnki` 是一个用于查找参考文献的 CNKI CLI。核心目标是快速检索论文、查看详情/参考文献，并直接导出 GB/T 7714 风格引用。
 
-- **`cnki` CLI**：Go 写的独立二进制，通过 chromedp 驱动本地 Chrome 访问中国知网执行检索，JSON 输出，可被任何工具/脚本调用。
-- **Claude Code Skill**：`SKILL.md` 指引 Claude 把自然语言翻译成 `cnki` 命令，自动化完成文献检索 → 解析 → 格式化 → 输出的全流程。
+- **`cnki` CLI**：Go 写的独立二进制，通过 HTTP 访问知网 `kns8s` 接口执行检索，支持 JSON 和直接引用格式输出，可被任何工具/脚本调用。
+- **Claude Code Skill**：`SKILL.md` 指引 Claude 把自然语言翻译成 `cnki` 命令，自动化完成文献检索、解析、格式化、输出。
 
-相比 v1，**不再依赖** `web-access` skill 或系统 Chrome 远程调试。整个项目自包含。
+相比 v2 的无头浏览器实现，当前版本不再依赖本地 Chrome、浏览器自动化或持久化会话目录。
 
 ## 功能
 
 - **多字段检索**：主题 / 关键词 / 篇名 / 作者 / 摘要 / 全文 / DOI
-- **高级筛选**：时间范围、文献类型（期刊/硕博/会议/报纸/年鉴）、来源类型（SCI/EI/核心/CSSCI/CSCD）
+- **筛选**：时间范围、文献类型（期刊/硕博/会议/报纸/年鉴）
 - **排序**：相关度 / 发表时间 / 被引 / 下载
 - **元数据抽取**：标题、作者、单位、摘要、关键词、DOI、分类号、基金、被引、下载
 - **参考文献导出**：GB/T 7714 格式
 - **多种输出**：JSON（默认）/ table / citation / markdown
-- **自动翻页**：按需抓取任意数量结果
-- **登录态持久化**：内置 profile 目录，`cnki login` 一次后续复用
-- **无头运行**：默认后台 Chrome，不打扰桌面
+- **自动翻页**：按需抓取指定数量结果
+
+说明：来源类型筛选（SCI/EI/核心/CSSCI/CSCD）在 HTTP 模式下暂未启用，避免静默返回不符合限制条件的结果。
 
 ## 架构
 
 ```
 ┌─────────────────┐   CLI args      ┌─────────────────────┐
 │  Claude Code    │ ───────────────▶│  cnki (Go binary)   │
-│  (SKILL.md)     │ ◀─── JSON ───── │  chromedp + Chrome  │
+│  (SKILL.md)     │ ◀─── JSON ───── │  HTTP client        │
 └─────────────────┘                 └──────────┬──────────┘
-                                               │ CDP
+                                               │ HTTPS
                                                ▼
                                      ┌───────────────────┐
                                      │  kns.cnki.net     │
@@ -48,9 +48,6 @@
 go install github.com/ExquisiteCore/cnki-search/cmd/cnki@latest
 # C. 源码构建：
 git clone https://github.com/ExquisiteCore/cnki-search && cd cnki-search && go build -o cnki ./cmd/cnki
-
-# 3. 首次登录（一次就好）
-cnki login
 ```
 
 ## 使用
@@ -61,8 +58,8 @@ cnki login
 # 基础检索（默认 JSON）
 cnki search "深度学习" --size=10
 
-# 核心期刊，按被引排序，近五年
-cnki search "大语言模型" --source=core --from=2020 --to=2025 --sort=cited --size=30
+# 按被引排序，近五年
+cnki search "大语言模型" --from=2020 --to=2025 --sort=cited --size=30
 
 # 人类可读表格
 cnki search "Transformer" --size=10 --format=table
@@ -82,7 +79,7 @@ cnki search "张钹" --field=author --size=15
 装好之后在 Claude Code 里直接用自然语言触发：
 
 ```
-帮我在知网上搜索"深度学习 图像识别"相关论文，要核心期刊，2020年以后的，按被引排序
+帮我在知网上搜索"深度学习 图像识别"相关论文，2020年以后的，按被引排序
 
 在知网检索作者"张钹"的论文
 
@@ -98,11 +95,8 @@ Claude 会自动拼 `cnki` 命令、解析 JSON、格式化输出。
 | Flag | 说明 | 默认 |
 |------|------|------|
 | `--format` | json / table / citation / markdown | json |
-| `--headed` | 有头模式（调试 / 登录 / 过验证码） | false |
-| `--timeout` | 整体超时 | 90s |
-| `--chrome` | Chrome 路径 | 自动探测 |
-| `--profile-dir` | 用户数据目录 | 系统 cache 目录下 |
-| `-v, --verbose` | 打印 chromedp 日志到 stderr | false |
+| `--timeout` | 单次命令整体超时 | 90s |
+| `--user-agent` | HTTP User-Agent | 模拟 Chrome |
 
 ### `cnki search <query>`
 
@@ -111,7 +105,7 @@ Claude 会自动拼 `cnki` 命令、解析 JSON、格式化输出。
 | `--field` | topic / keyword / title / author / abstract / fulltext / doi | topic |
 | `--from` / `--to` | 年份 | 不限 |
 | `--type` | journal / master / phd / conference / newspaper / yearbook（可重复） | 全部 |
-| `--source` | sci / ei / core / cssci / cscd（可重复） | 全部 |
+| `--source` | 暂不支持 HTTP 模式 | 无 |
 | `--sort` | relevance / date / cited / downloads | relevance |
 | `--size` | 1-500 | 20 |
 
@@ -125,17 +119,13 @@ Claude 会自动拼 `cnki` 命令、解析 JSON、格式化输出。
 
 只抽参考文献。
 
-### `cnki login`
-
-有头模式打开知网，用户手动登录后保存 cookie。**首次使用前跑一次。**
-
 ## 退出码
 
 | 码 | 含义 |
 |----|------|
 | 0 | 成功 |
-| 1 | 一般错误（网络 / DOM） |
-| 2 | 验证码或反爬拦截（跑 `cnki login` 或 `--headed` 重试） |
+| 1 | 一般错误（网络 / HTTP / 解析） |
+| 2 | 验证码或反爬拦截 |
 | 3 | 无结果 |
 | 4 | 参数非法 |
 
@@ -145,30 +135,19 @@ Claude 会自动拼 `cnki` 命令、解析 JSON、格式化输出。
 cnki-search/
 ├── cmd/cnki/                  # Go CLI 入口
 ├── internal/                  # Go 内部包
-│   ├── browser/               #   chromedp 封装、profile 管理、验证码检测
 │   ├── cli/                   #   cobra 命令定义
-│   ├── cnki/                  #   知网业务逻辑（search/detail/refs + selectors）
+│   ├── cnki/                  #   HTTP client + 知网业务逻辑
 │   ├── model/                 #   数据结构
 │   └── render/                #   json/table/citation/markdown 渲染
-├── skills/cnki-search/        # Claude Code Skill 资源（plugin 规范布局）
-│   ├── SKILL.md               #   Claude 读取的 Skill 定义
-│   └── references/
-│       └── cnki.net.md        #   知网站点经验（DOM/反爬/陷阱）
+├── skills/cnki-search/        # Claude Code Skill 资源
 ├── .claude-plugin/            # Claude Code 插件元数据
-│   ├── plugin.json
-│   └── marketplace.json
 ├── .github/workflows/         # CI / Release
 ├── .goreleaser.yaml
 ├── go.mod / go.sum
-├── INSTALL.md                 # 安装指南（Plugin + CLI 两部分）
-├── README.md                  # 本文件
+├── INSTALL.md
+├── README.md
 └── LICENSE
 ```
-
-两部分明确分工：
-
-- **Go CLI 部分**（`cmd/`, `internal/`, `go.mod`, `.goreleaser.yaml`）——独立二进制，可被任何工具调用
-- **Plugin 部分**（`skills/`, `.claude-plugin/`）——Claude Code 读取的 SKILL.md，告诉 Claude 怎么调用 CLI
 
 ## License
 

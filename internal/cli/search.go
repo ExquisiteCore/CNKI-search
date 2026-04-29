@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ExquisiteCore/cnki-search/internal/browser"
 	"github.com/ExquisiteCore/cnki-search/internal/cnki"
 	"github.com/ExquisiteCore/cnki-search/internal/model"
 	"github.com/ExquisiteCore/cnki-search/internal/render"
@@ -47,13 +46,8 @@ func newSearchCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), globals.Timeout)
 			defer cancel()
 
-			br, closeBr, err := browser.New(ctx, browserOptsFromGlobals())
-			if err != nil {
-				return withCode(err, 1)
-			}
-			defer closeBr()
-
-			result, err := cnki.Search(br, q)
+			client := cnki.NewClient(cnki.ClientOptions{UserAgent: globals.UserAgent})
+			result, err := client.Search(ctx, q)
 			if err != nil {
 				return withCode(err, cnki.ExitCodeFor(err))
 			}
@@ -72,7 +66,7 @@ func newSearchCmd() *cobra.Command {
 	pf.IntVar(&f.from, "from", 0, "起始年份（含）")
 	pf.IntVar(&f.to, "to", 0, "截止年份（含）")
 	pf.StringSliceVar(&f.types, "type", nil, "文献类型：journal|master|phd|conference|newspaper|yearbook")
-	pf.StringSliceVar(&f.sources, "source", nil, "来源类型：sci|ei|core|cssci|cscd")
+	pf.StringSliceVar(&f.sources, "source", nil, "来源类型：HTTP 模式暂不支持（保留该 flag 以给出明确错误）")
 	pf.StringVar(&f.sort, "sort", "relevance", "排序方式：relevance|date|cited|downloads")
 	pf.IntVar(&f.size, "size", 20, "需要的结果数量（自动翻页满足）")
 	return cmd
@@ -91,14 +85,8 @@ func validateSearch(q *model.Query) error {
 	if q.From != 0 && q.To != 0 && q.From > q.To {
 		return fmt.Errorf("--from (%d) cannot be greater than --to (%d)", q.From, q.To)
 	}
-	return nil
-}
-
-func browserOptsFromGlobals() browser.Options {
-	return browser.Options{
-		Headless:   !globals.Headed,
-		ChromePath: globals.ChromePath,
-		ProfileDir: globals.ProfileDir,
-		Verbose:    globals.Verbose,
+	if len(q.Sources) > 0 {
+		return fmt.Errorf("--source is not supported by HTTP mode yet")
 	}
+	return nil
 }

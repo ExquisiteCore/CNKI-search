@@ -4,7 +4,7 @@ package cli
 // Exit codes in use:
 //
 //	1  generic error
-//	2  captcha/anti-bot intercepted (user needs to re-login or use --headed)
+//	2  captcha/anti-bot intercepted
 //	3  no results / empty search
 //	4  invalid argument
 type CodedError interface {

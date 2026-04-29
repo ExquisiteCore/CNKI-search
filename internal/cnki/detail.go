@@ -1,94 +1,162 @@
 package cnki
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"time"
+	"net/http"
+	"regexp"
+	"strings"
 
-	"github.com/ExquisiteCore/cnki-search/internal/browser"
 	"github.com/ExquisiteCore/cnki-search/internal/model"
-	"github.com/chromedp/chromedp"
 )
 
-// Detail opens a paper's abstract page and extracts full metadata.
-// If withRefs is true, also harvests the references list.
-func Detail(br *browser.Browser, url string, withRefs bool) (*model.Detail, error) {
-	if url == "" {
+// Detail fetches a paper abstract page over HTTP and extracts metadata.
+func (c *Client) Detail(ctx context.Context, rawURL string, withRefs bool) (*model.Detail, error) {
+	if rawURL == "" {
 		return nil, fmt.Errorf("url is empty")
 	}
-	if err := chromedp.Run(br.Ctx,
-		chromedp.Navigate(url),
-		chromedp.Sleep(2*time.Second),
-	); err != nil {
+	if err := c.ensureClientID(ctx); err != nil {
+		return nil, fmt.Errorf("prepare client id: %w", err)
+	}
+	body, err := c.fetchHTML(ctx, rawURL, URLKNSBase)
+	if err != nil {
 		return nil, fmt.Errorf("open detail: %w", err)
 	}
-	if err := br.HandleCaptcha(); err != nil {
-		return nil, ErrCaptcha
-	}
 
-	var raw string
-	if err := chromedp.Run(br.Ctx, chromedp.Evaluate(detailJS, &raw)); err != nil {
-		return nil, fmt.Errorf("extract detail: %w", err)
-	}
-	var d model.Detail
-	if err := json.Unmarshal([]byte(raw), &d); err != nil {
-		return nil, fmt.Errorf("parse detail: %w", err)
-	}
-	d.URL = url
-
+	d := parseDetailHTML(body)
+	d.URL = rawURL
 	if withRefs {
-		refs, err := extractReferences(br)
-		if err != nil {
-			return &d, err
-		}
-		d.References = refs
+		d.References = parseReferencesHTML(body)
 	}
 	return &d, nil
 }
 
-// detailJS collects every field we care about on the paper detail page.
-// CNKI has several layouts (老版/新版/个人版/机构版); selectors are generous.
-const detailJS = `(() => {
-  const pickTxt = (sels) => {
-    for (const s of sels) { const el = document.querySelector(s); if (el) { const t = (el.innerText || el.textContent || "").trim(); if (t) return t; } }
-    return "";
-  };
-  const pickAll = (sels) => {
-    for (const s of sels) { const list = [...document.querySelectorAll(s)]; if (list.length) return list.map(e => (e.textContent || "").trim()).filter(Boolean); }
-    return [];
-  };
-  const intOr0 = (s) => { const n = parseInt((s||"").replace(/[^0-9]/g, ""), 10); return isNaN(n) ? 0 : n; };
+func (c *Client) fetchHTML(ctx context.Context, rawURL, referer string) (string, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Referer", referer)
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	return c.doText(req)
+}
 
-  const title = pickTxt(["h1", ".wx-tit h1", ".title h1"]);
-  const authors = pickAll([".author a", "h3.author a", ".wx-tit h3:first-of-type a"]);
-  const institutions = pickAll([".orgn a", "h3.orgn a", "h3:nth-of-type(2) a"]);
-  const abs = pickTxt(["#ChDivSummary", ".abstract-text", ".brief .abs"]);
-  const keywords = pickAll([".keywords a", "p.keywords a"]).map(s => s.replace(/[;；,\s]+$/, ""));
+func parseDetailHTML(body string) model.Detail {
+	topTip := textOnly(firstMatch(body, `(?is)<(?:div|p|span)\b[^>]*class\s*=\s*["'][^"']*(?:top-tip|wxTitle|top-space|sourinfo)[^"']*["'][^>]*>(.*?)</(?:div|p|span)>`))
+	bodyText := textOnly(body)
+	source := firstNonEmptyText(body, []string{
+		`(?is)<[^>]*class\s*=\s*["'][^"']*(?:top-tip|sourinfo|top-space)[^"']*["'][^>]*>.*?<a\b[^>]*>(.*?)</a>`,
+		`(?is)<[^>]*class\s*=\s*["'][^"']*journal-name[^"']*["'][^>]*>(.*?)</[^>]+>`,
+	})
+	if source == "" {
+		source = sourceFromTopTip(topTip)
+	}
+	issue := firstNonEmptyText(body, []string{
+		`(?is)<[^>]*class\s*=\s*["'][^"']*(?:top-tip|sourinfo|top-space)[^"']*["'][^>]*>.*?<[^>]*class\s*=\s*["'][^"']*year[^"']*["'][^>]*>(.*?)</[^>]+>`,
+		`(?is)<[^>]*class\s*=\s*["'][^"']*\bissue\b[^"']*["'][^>]*>(.*?)</[^>]+>`,
+	})
+	if issue == "" {
+		issue = issueFromTopTip(topTip)
+	}
 
-  const topTipText = (() => {
-    const el = document.querySelector(".top-tip, .wxTitle, .top-space");
-    return el ? (el.innerText || "").trim() : "";
-  })();
+	return model.Detail{
+		Title:        firstNonEmptyText(body, []string{`(?is)<h1\b[^>]*>(.*?)</h1>`, `(?is)<title\b[^>]*>(.*?)</title>`}),
+		Authors:      anchorsFromClass(body, "author"),
+		Institutions: anchorsFromClass(body, "orgn"),
+		Abstract:     firstNonEmptyText(body, []string{`(?is)<[^>]*\bid\s*=\s*["']ChDivSummary["'][^>]*>(.*?)</[^>]+>`, `(?is)<[^>]*class\s*=\s*["'][^"']*abstract-text[^"']*["'][^>]*>(.*?)</[^>]+>`}),
+		Keywords:     cleanKeywords(anchorsFromClass(body, "keywords")),
+		DOI:          matchAfter(bodyText, "DOI"),
+		CLC:          matchAfter(bodyText, "分类号"),
+		Source:       source,
+		Issue:        issue,
+		Year:         firstYear(issue),
+		Fund:         firstNonEmptyText(body, []string{`(?is)<[^>]*class\s*=\s*["'][^"']*\bfunds?\b[^"']*["'][^>]*>(.*?)</[^>]+>`}),
+		Cited:        intOrZero(firstNonEmptyText(body, []string{`(?is)<[^>]*\bid\s*=\s*["']annotationcount["'][^>]*>(.*?)</[^>]+>`, `(?is)<[^>]*class\s*=\s*["'][^"']*\bcited\b[^"']*["'][^>]*>(.*?)</[^>]+>`})),
+		Downloads:    intOrZero(firstNonEmptyText(body, []string{`(?is)<[^>]*\bid\s*=\s*["']downloadcount["'][^>]*>(.*?)</[^>]+>`, `(?is)<[^>]*class\s*=\s*["'][^"']*\bdownload\b[^"']*["'][^>]*>(.*?)</[^>]+>`})),
+	}
+}
 
-  const matchAfter = (label) => {
-    const re = new RegExp(label + "[：:]\\s*([^\\n\\r]+)");
-    const m = (topTipText + "\\n" + document.body.innerText).match(re);
-    return m ? m[1].trim() : "";
-  };
-  const doi = matchAfter("DOI");
-  const clc = matchAfter("分类号");
-  const fund = pickTxt([".funds", ".fund", "p.funds"]);
+func firstNonEmptyText(body string, patterns []string) string {
+	for _, pattern := range patterns {
+		if t := textOnly(firstMatch(body, pattern)); t != "" {
+			t = strings.TrimSuffix(t, " - 中国知网")
+			if t != "" {
+				return t
+			}
+		}
+	}
+	return ""
+}
 
-  const source = pickTxt([".top-tip a:first-child", ".sourinfo a", ".top-space a", ".journal-name"]);
-  const issueRaw = pickTxt([".top-tip .year", ".sourinfo .year", ".top-space .year", ".issue"]);
-  const yearMatch = issueRaw.match(/(\d{4})/);
-  const year = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+func anchorsFromClass(body, className string) []string {
+	block := blockByClass(body, className)
+	if block == "" {
+		return nil
+	}
+	return anchorTexts(block)
+}
 
-  const cited = intOr0(pickTxt(["#annotationcount", ".cited", ".num.cited"]));
-  const downloads = intOr0(pickTxt(["#downloadcount", ".download", ".num.download"]));
+func blockByClass(body, className string) string {
+	for _, tag := range []string{"div", "p", "h3", "section", "span"} {
+		pattern := fmt.Sprintf(`(?is)<%s\b[^>]*class\s*=\s*["'][^"']*\b%s\b[^"']*["'][^>]*>(.*?)</%s>`, tag, regexp.QuoteMeta(className), tag)
+		if block := firstMatch(body, pattern); block != "" {
+			return block
+		}
+	}
+	return ""
+}
 
-  return JSON.stringify({
-    title, authors, institutions, abstract: abs, keywords,
-    doi, clc, fund, source, issue: issueRaw, year, cited, downloads
-  });
-})()`
+func cleanKeywords(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, keyword := range in {
+		keyword = strings.Trim(keyword, " ;；,，、")
+		if keyword != "" {
+			out = append(out, keyword)
+		}
+	}
+	return out
+}
+
+func matchAfter(text, label string) string {
+	pattern := fmt.Sprintf(`(?is)%s\s*[：:]\s*([^\n\r]+)`, regexp.QuoteMeta(label))
+	m := regexp.MustCompile(pattern).FindStringSubmatch(text)
+	if len(m) < 2 {
+		return ""
+	}
+	value := strings.TrimSpace(m[1])
+	for _, next := range []string{" DOI", " 分类号", " 基金", " 来源", " 被引", " 下载"} {
+		if idx := strings.Index(value, next); idx >= 0 {
+			value = strings.TrimSpace(value[:idx])
+		}
+	}
+	if label == "分类号" || label == "DOI" {
+		if fields := strings.Fields(value); len(fields) > 0 {
+			value = fields[0]
+		}
+	}
+	return strings.Trim(value, " ;；,，")
+}
+
+func sourceFromTopTip(topTip string) string {
+	if topTip == "" {
+		return ""
+	}
+	yearRE := regexp.MustCompile(`\b(19|20|21)\d{2}\b`)
+	loc := yearRE.FindStringIndex(topTip)
+	if loc == nil {
+		return topTip
+	}
+	return strings.TrimSpace(topTip[:loc[0]])
+}
+
+func issueFromTopTip(topTip string) string {
+	if topTip == "" {
+		return ""
+	}
+	yearRE := regexp.MustCompile(`\b(19|20|21)\d{2}[^\s]*`)
+	if m := yearRE.FindString(topTip); m != "" {
+		return strings.TrimSpace(m)
+	}
+	return ""
+}

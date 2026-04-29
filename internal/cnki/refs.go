@@ -1,67 +1,60 @@
 package cnki
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"time"
+	"regexp"
 
-	"github.com/ExquisiteCore/cnki-search/internal/browser"
 	"github.com/ExquisiteCore/cnki-search/internal/model"
-	"github.com/chromedp/chromedp"
 )
 
-// References navigates to the paper detail page (if not already there) and
-// returns the parsed references list.
-func References(br *browser.Browser, url string) ([]model.Reference, error) {
-	if url == "" {
+// References fetches a paper abstract page and extracts its reference list.
+func (c *Client) References(ctx context.Context, rawURL string) ([]model.Reference, error) {
+	if rawURL == "" {
 		return nil, fmt.Errorf("url is empty")
 	}
-	if err := chromedp.Run(br.Ctx,
-		chromedp.Navigate(url),
-		chromedp.Sleep(2*time.Second),
-	); err != nil {
+	if err := c.ensureClientID(ctx); err != nil {
+		return nil, fmt.Errorf("prepare client id: %w", err)
+	}
+	body, err := c.fetchHTML(ctx, rawURL, URLKNSBase)
+	if err != nil {
 		return nil, fmt.Errorf("open detail: %w", err)
 	}
-	if err := br.HandleCaptcha(); err != nil {
-		return nil, ErrCaptcha
-	}
-	return extractReferences(br)
+	return parseReferencesHTML(body), nil
 }
 
-// extractReferences is shared by `cnki refs` and `cnki detail --with-refs`.
-// It first tries to expand the 参考文献 tab, then scrapes the list.
-func extractReferences(br *browser.Browser) ([]model.Reference, error) {
-	const expandJS = `(() => {
-  const anchors = [...document.querySelectorAll("a, .tab-title, .tab-item, li")];
-  const hit = anchors.find(a => (a.textContent || "").trim().indexOf("参考文献") >= 0);
-  if (hit) { hit.click(); return "CLICKED"; }
-  return "NONE";
-})()`
-	var _clicked string
-	_ = chromedp.Run(br.Ctx,
-		chromedp.Evaluate(expandJS, &_clicked),
-		chromedp.Sleep(1500*time.Millisecond),
-	)
-
-	const readJS = `(() => {
-  const sels = ["#CataLogContent .essayBox li", "#CataLogContent .essayLi", ".ref-list li", "#references li", "#div_Summary li"];
-  let nodes = [];
-  for (const s of sels) { const n = document.querySelectorAll(s); if (n && n.length) { nodes = [...n]; break; } }
-  const out = [];
-  nodes.forEach((li, i) => {
-    const t = (li.textContent || "").trim().replace(/\s+/g, " ");
-    if (t) out.push({ seq: i + 1, text: t });
-  });
-  return JSON.stringify(out);
-})()`
-
-	var raw string
-	if err := chromedp.Run(br.Ctx, chromedp.Evaluate(readJS, &raw)); err != nil {
-		return nil, fmt.Errorf("extract refs: %w", err)
+func parseReferencesHTML(body string) []model.Reference {
+	block := firstNonEmptyRaw(body, []string{
+		`(?is)<[^>]*\bid\s*=\s*["']CataLogContent["'][^>]*>(.*?)(?:</section>|<footer\b|</body>)`,
+		`(?is)<[^>]*class\s*=\s*["'][^"']*ref-list[^"']*["'][^>]*>(.*?)</[^>]+>`,
+		`(?is)<[^>]*\bid\s*=\s*["']references["'][^>]*>(.*?)</[^>]+>`,
+		`(?is)<[^>]*\bid\s*=\s*["']div_Summary["'][^>]*>(.*?)</[^>]+>`,
+	})
+	if block == "" {
+		return nil
 	}
-	var refs []model.Reference
-	if err := json.Unmarshal([]byte(raw), &refs); err != nil {
-		return nil, fmt.Errorf("parse refs: %w", err)
+
+	items := allMatches(block, `(?is)<li\b[^>]*>(.*?)</li>`)
+	refs := make([]model.Reference, 0, len(items))
+	for _, item := range items {
+		text := textOnly(item)
+		if text == "" {
+			continue
+		}
+		refs = append(refs, model.Reference{
+			Seq:  len(refs) + 1,
+			Text: text,
+		})
 	}
-	return refs, nil
+	return refs
+}
+
+func firstNonEmptyRaw(body string, patterns []string) string {
+	for _, pattern := range patterns {
+		m := regexp.MustCompile(pattern).FindStringSubmatch(body)
+		if len(m) >= 2 && m[1] != "" {
+			return m[1]
+		}
+	}
+	return ""
 }

@@ -9,17 +9,17 @@ metadata:
   version: "2.0.0"
 ---
 
-# CNKI 知网检索 Skill
+# CNKI 参考文献检索 Skill
 
 ## 概述
 
-通过独立的 `cnki` Go CLI 驱动本地 Chrome 访问中国知网，执行学术文献检索任务。**不再依赖外部 web-access skill**——本 skill 自带独立的 chromedp 驱动的二进制工具，仅在首次使用时需要登录一次知网账号。
+通过独立的 `cnki` Go CLI 以 HTTP 方式访问中国知网 `kns8s` 接口，执行参考文献检索、详情查看、参考文献抽取和引用格式导出任务。当前版本不依赖外部 web-access skill、本地 Chrome、浏览器自动化或持久化会话目录。
 
 Claude 在这里的职责是：
 
 1. 把用户的自然语言需求翻译成 `cnki` 命令行参数
 2. 执行命令，解析返回的 JSON
-3. 按用户要求渲染成表格 / 引用格式 / 详细卡片
+3. 按用户要求渲染成表格 / 引用格式 / 详细卡片，其中 `--format=citation` 是核心能力，不能丢
 
 ## 前置依赖
 
@@ -33,11 +33,9 @@ cnki --version
 
 如果未安装或返回错误，引导用户按 `INSTALL.md` 步骤安装（推荐：去 GitHub Release 下载预编译二进制并加入 PATH；或 `go install github.com/ExquisiteCore/cnki-search/cmd/cnki@latest`）。
 
-### 登录态检查
+### 风控处理
 
-知网部分功能（高级筛选、某些年份的详情页、下载）需要登录。**首次使用请提示用户跑一次 `cnki login`**——这会弹出有头 Chrome 让用户手动登录，cookie 保存到本地 profile 目录后，后续无头命令自动复用。
-
-如果后续命令返回退出码 `2`（ErrCaptcha），说明触发了验证码或登录失效，按下文"错误处理"引导用户重新登录。
+当前 HTTP 模式不会弹出浏览器登录或人工过验证码。若命令返回退出码 `2`（ErrCaptcha），说明触发了验证码或反爬拦截，按下文"错误处理"降低频率或稍后重试。
 
 ## 检索流程
 
@@ -52,7 +50,7 @@ cnki --version
 | 起始年份 | `--from` | YYYY | 不限 |
 | 截止年份 | `--to` | YYYY | 不限 |
 | 文献类型 | `--type` | journal / master / phd / conference / newspaper / yearbook（可重复） | 全部 |
-| 来源类型 | `--source` | sci / ei / core / cssci / cscd（可重复） | 全部 |
+| 来源类型 | `--source` | HTTP 模式暂不支持 | 不使用 |
 | 排序方式 | `--sort` | relevance / date / cited / downloads | relevance |
 | 结果数量 | `--size` | 任意正整数（≤500） | 20 |
 
@@ -66,7 +64,6 @@ cnki --version
 cnki search "深度学习 图像识别" \
   --field=topic \
   --from=2020 \
-  --source=core \
   --sort=cited \
   --size=30 \
   --format=json
@@ -143,6 +140,7 @@ cnki search "深度学习" --size=10 --format=table
 
 ```bash
 cnki search "深度学习" --size=10 --format=citation
+cnki search "知识图谱" --size=20 --format=citation
 ```
 
 输出：
@@ -195,7 +193,7 @@ cnki detail "<paper url>" --with-refs --format=markdown
 |--------|------|------|
 | 0 | 成功 | 解析 JSON 继续 |
 | 1 | 一般错误（网络/DOM 异常） | 读 stderr 提示用户 |
-| 2 | 验证码或反爬拦截 | 提示用户运行 `cnki login`，或改用 `--headed` 重试 |
+| 2 | 验证码或反爬拦截 | 降低频率、稍后重试，或更换合规网络环境 |
 | 3 | 检索结果为空 | 建议用户调整关键词、放宽时间、换检索字段 |
 | 4 | 参数非法 | 读 stderr 的校验提示，重新询问用户 |
 
@@ -203,18 +201,15 @@ cnki detail "<paper url>" --with-refs --format=markdown
 
 优先级从高到低：
 
-1. 引导用户跑 `cnki login` 更新登录态，然后重试
-2. 若用户不想登录，改用 `--headed` 人工过一次验证码：
-   ```bash
-   cnki search "..." --headed --size=10
-   ```
-3. 告知用户短期频繁检索容易触发风控，建议降低频率
+1. 告知用户短期频繁检索容易触发风控，建议降低频率
+2. 稍后重试，必要时调整 `--timeout`
+3. 更换合规网络环境后重试
 
 ### 遇到退出码 3（无结果）
 
 - 放宽 `--from/--to` 年份
 - 把 `--field` 从 `title` 改为 `topic` 或 `keyword`
-- 去掉 `--source` / `--type` 的限制
+- 去掉 `--type` 的限制
 - 建议同义词替换（"大语言模型" → "LLM" / "预训练语言模型"）
 
 ## 操作节奏
@@ -229,10 +224,10 @@ cnki detail "<paper url>" --with-refs --format=markdown
 
 当 lunwen（毕业论文写作）skill 需要文献检索时，本 skill 可被调用来：
 
-1. 根据论文主题检索相关文献：`cnki search "主题" --source=core --sort=cited`
+1. 根据论文主题检索相关文献：`cnki search "主题" --sort=cited`
 2. 提取参考文献元数据：`cnki detail <url>`
 3. 输出 GB/T 7714 格式：`cnki search ... --format=citation`
-4. 筛选高被引/核心期刊文献
+4. 筛选高被引文献
 
 ### 与 research-writing-skill 协作
 
@@ -247,7 +242,7 @@ cnki detail "<paper url>" --with-refs --format=markdown
 ```
 必须加载 cnki-search skill 并遵循指引。
 任务：用 `cnki` 命令行在知网上获取关于「{主题}」的学术文献，需要 {N} 篇，
-按被引频次排序，仅限核心期刊，时间范围 2020-2025。
+按被引频次排序，时间范围 2020-2025。
 将结果以 GB/T 7714 格式返回。
 ```
 
@@ -262,4 +257,4 @@ cnki detail "<paper url>" --with-refs --format=markdown
 
 ## 参考：知网站点特性
 
-参见同目录下的 `references/cnki.net.md` —— 记录了 CNKI 的 Vue SPA 架构、反爬行为、已知选择器陷阱等知识。该文件也是 `cnki` 二进制的 DOM 选择器（位于项目 `internal/cnki/selectors.go`）的维护参考。
+参见同目录下的 `references/cnki.net.md` —— 记录了 CNKI 的 kns8s 架构、反爬行为、HTTP 接口和编码注意事项。
