@@ -3,7 +3,7 @@
 `cnki` 是一个用于查找参考文献的 CNKI CLI。核心目标是快速检索论文、查看详情/参考文献，并直接导出 GB/T 7714 风格引用。
 
 - **`cnki` CLI**：Go 写的独立二进制，通过 HTTP 访问知网 `kns8s` 接口执行检索，支持 JSON 和直接引用格式输出，可被任何工具/脚本调用。
-- **Claude Code Skill**：`SKILL.md` 指引 Claude 把自然语言翻译成 `cnki` 命令，自动化完成文献检索、解析、格式化、输出。
+- **Codex / Claude Code Skill**：`SKILL.md` 指引 agent 把自然语言翻译成 `cnki` 命令，自动化完成文献检索、解析、格式化、输出。
 
 相比 v2 的无头浏览器实现，当前版本不再依赖本地 Chrome、浏览器自动化或持久化会话目录。
 
@@ -23,7 +23,7 @@
 
 ```
 ┌─────────────────┐   CLI args      ┌─────────────────────┐
-│  Claude Code    │ ───────────────▶│  cnki (Go binary)   │
+│ Codex / Claude  │ ───────────────▶│  cnki (Go binary)   │
 │  (SKILL.md)     │ ◀─── JSON ───── │  HTTP client        │
 └─────────────────┘                 └──────────┬──────────┘
                                                │ HTTPS
@@ -38,7 +38,9 @@
 详见 [INSTALL.md](INSTALL.md)。简单来说：
 
 ```bash
-# 1. 装 Plugin（在 Claude Code 里执行）
+# 1. 装 Skill/Plugin
+# Codex: 使用 .codex-plugin/plugin.json + skills/cnki-search/
+# Claude Code:
 /plugin marketplace add ExquisiteCore/cnki-search
 /plugin install cnki-search@cnki-search
 
@@ -74,9 +76,9 @@ cnki detail "https://kns.cnki.net/kcms2/article/abstract?v=..." --with-refs --fo
 cnki search "张钹" --field=author --size=15
 ```
 
-### 作为 Claude Code Skill 用
+### 作为 Codex / Claude Code Skill 用
 
-装好之后在 Claude Code 里直接用自然语言触发：
+装好之后在 Codex 或 Claude Code 里直接用自然语言触发：
 
 ```
 帮我在知网上搜索"深度学习 图像识别"相关论文，2020年以后的，按被引排序
@@ -86,7 +88,7 @@ cnki search "张钹" --field=author --size=15
 帮我查一下知网上关于"大语言模型"的最新研究，需要 30 篇，给我 GB/T 7714 引用格式
 ```
 
-Claude 会自动拼 `cnki` 命令、解析 JSON、格式化输出。
+agent 会自动拼 `cnki` 命令、解析 JSON、格式化输出。
 
 ## 命令速查
 
@@ -139,7 +141,8 @@ cnki-search/
 │   ├── cnki/                  #   HTTP client + 知网业务逻辑
 │   ├── model/                 #   数据结构
 │   └── render/                #   json/table/citation/markdown 渲染
-├── skills/cnki-search/        # Claude Code Skill 资源
+├── skills/cnki-search/        # Codex / Claude Code Skill 资源
+├── .codex-plugin/             # Codex 插件元数据
 ├── .claude-plugin/            # Claude Code 插件元数据
 ├── .github/workflows/         # CI / Release
 ├── .goreleaser.yaml

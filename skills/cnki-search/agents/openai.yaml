@@ -1,0 +1,7 @@
+interface:
+  display_name: "CNKI Search"
+  short_description: "检索知网文献并导出引用"
+  default_prompt: "Use $cnki-search to find CNKI papers for my topic and return GB/T 7714 citations."
+
+policy:
+  allow_implicit_invocation: true

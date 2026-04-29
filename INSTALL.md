@@ -1,13 +1,27 @@
 # cnki-search 安装指南
 
-本仓库由两部分组成，**都需要装上才能在 Claude Code 里自然语言触发知网参考文献检索与引用导出**：
+本仓库由两部分组成，**都需要装上才能在 Codex 或 Claude Code 里自然语言触发知网参考文献检索与引用导出**：
 
-1. **Claude Code Plugin**：`.claude-plugin/plugin.json` + `skills/cnki-search/SKILL.md`，告诉 Claude 怎么调用 CLI
+1. **Codex / Claude Code Skill**：`.codex-plugin/plugin.json`、`.claude-plugin/plugin.json` + `skills/cnki-search/SKILL.md`，告诉 agent 怎么调用 CLI
 2. **`cnki` CLI 二进制**：Go 程序，通过 HTTP 访问知网 `kns8s` 接口，支持直接输出引用格式
 
 当前版本不需要本地 Chrome、浏览器自动化或持久化会话目录，也没有登录初始化步骤。
 
-## 一、安装 Plugin（推荐：Claude Code Marketplace）
+## 一、安装 Skill / Plugin
+
+### Codex
+
+Codex 适配文件在：
+
+```text
+.codex-plugin/plugin.json
+skills/cnki-search/SKILL.md
+skills/cnki-search/agents/openai.yaml
+```
+
+将本仓库作为本地 Codex plugin/skill 加载后，Codex 可通过 `$cnki-search` 或相关自然语言请求触发。
+
+### Claude Code（兼容）
 
 在 Claude Code 里执行：
 
@@ -28,7 +42,7 @@ claude --plugin-dir /path/to/cnki-search
 
 ## 二、安装 `cnki` CLI
 
-Plugin 只负责告诉 Claude 怎么调 CLI，CLI 本身必须装到系统 `PATH`。三种方式任选其一：
+Skill/Plugin 只负责告诉 agent 怎么调 CLI，CLI 本身必须装到系统 `PATH`。三种方式任选其一：
 
 ### 方式 A：下载预编译二进制（推荐）
 
@@ -70,8 +84,8 @@ go build -o cnki ./cmd/cnki    # Linux/macOS
 cnki search "测试" --size=3 --format=table
 cnki search "测试" --size=3 --format=citation
 
-# 2. 在 Claude Code 里说："帮我在知网上搜深度学习相关的论文 5 篇"
-#    Claude 应该自动拼出 cnki 命令并把结果渲染成表格
+# 2. 在 Codex 或 Claude Code 里说："帮我在知网上搜深度学习相关的论文 5 篇"
+#    agent 应该自动拼出 cnki 命令并把结果渲染成表格
 ```
 
 ## 前置要求
@@ -103,8 +117,9 @@ go version
 
 如果低于 1.26，用方式 A（下载预编译二进制）绕过。
 
-### Plugin 装好了但 Claude 不识别 skill
+### Skill/Plugin 装好了但 agent 不识别 skill
 
-1. 跑 `/reload-plugins` 或重启 Claude Code
-2. 跑 `/plugin` 确认 `cnki-search` 在已启用列表里
-3. 确认仓库里 `skills/cnki-search/SKILL.md` 存在且 frontmatter 有 `description` 字段
+1. Codex：确认本仓库以 Codex plugin/skill 形式加载，且 `.codex-plugin/plugin.json` 指向 `./skills/`
+2. Claude Code：跑 `/reload-plugins` 或重启 Claude Code
+3. Claude Code：跑 `/plugin` 确认 `cnki-search` 在已启用列表里
+4. 确认仓库里 `skills/cnki-search/SKILL.md` 存在且 frontmatter 有 `description` 字段
